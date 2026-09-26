@@ -1,0 +1,84 @@
+name: Build دفتر اقساط الصقر APK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: |
+          yes | sdkmanager --licenses || true
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Extract Android project
+        shell: bash
+        run: |
+          set -e
+          mkdir -p android-project
+
+          ZIP_FILE="$(find . -maxdepth 1 -type f -name '*.zip' -printf '%T@ %p\n' | sort -nr | head -n 1 | cut -d' ' -f2-)"
+          if [ -z "$ZIP_FILE" ]; then
+            echo "لم يتم العثور على ملف ZIP"
+            exit 1
+          fi
+
+          echo "Using ZIP: $ZIP_FILE"
+          unzip -q "$ZIP_FILE" -d android-project
+
+          PROJECT_DIR="$(find android-project -type f \( -name 'settings.gradle' -o -name 'settings.gradle.kts' \) -printf '%h\n' | head -n 1)"
+          if [ -z "$PROJECT_DIR" ]; then
+            PROJECT_DIR="$(find android-project -type f -name 'build.gradle' -printf '%h\n' | head -n 1)"
+          fi
+
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "لم يتم العثور على مجلد مشروع Android داخل ZIP"
+            exit 1
+          fi
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Project directory: $PROJECT_DIR"
+
+      - name: Build APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -e
+          gradle assembleDebug --stacktrace
+
+      - name: Find APK
+        id: apk
+        shell: bash
+        run: |
+          APK_PATH="$(find "${{ env.PROJECT_DIR }}" -type f -name '*.apk' | head -n 1)"
+          if [ -z "$APK_PATH" ]; then
+            echo "لم يتم العثور على APK"
+            exit 1
+          fi
+          echo "APK_PATH=$APK_PATH" >> "$GITHUB_ENV"
+          echo "Found: $APK_PATH"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: daftar-aqsat-saqr-apk
+          path: ${{ env.APK_PATH }}
+          if-no-files-found: error
